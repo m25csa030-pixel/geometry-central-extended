@@ -70,7 +70,85 @@ cmake --build build -j$(nproc)
 | Ada Lovelace (L4, RTX 40xx) | `89` |
 | Hopper (H100) | `90` |
 
-See [`docs/gpu_solver/`](docs/gpu_solver/) for architecture details, benchmark data, and known limitations.
+See [`docs/gpu_solver/`](docs/gpu_solver/) for full architecture details, benchmark data, and known limitations.
+
+---
+
+## GPU Performance Benchmarks
+
+> Benchmarks run on **NVIDIA L4 GPU** (Ada Lovelace, 24 GB VRAM) vs. **AMD EPYC 7742 CPU** (64-core), CUDA 12.6, FP64, averaged over 10 timed runs with 3 warmup solves.
+
+### What do these numbers mean?
+
+The Heat Method works in two steps:
+1. **Solve a heat diffusion equation** — spreads "heat" from a source vertex across the mesh.
+2. **Solve a Poisson equation** — integrates the heat gradient into geodesic distances.
+
+Both steps involve solving large sparse linear systems. On CPU, the default solver does a one-time matrix factorization (Cholesky), then cheap back-substitutions. The GPU backend replaces this with an iterative Jacobi-preconditioned Conjugate Gradient (PCG) solver — no expensive factorization, just repeated matrix-vector products on the GPU.
+
+---
+
+### Heat Diffusion Solve (`M + tL`, the well-conditioned system)
+
+This is where the GPU shines. The system is well-conditioned (converges in ~25–90 iterations), so PCG is very efficient.
+
+| Mesh Size | CPU Time | GPU Time | Speedup |
+|---|---|---|---|
+| 2,930 vertices (small) | 5.3 ms | 6.1 ms | 0.9× — CPU faster |
+| 11,714 vertices | 25.7 ms | 8.2 ms | **3.1× faster** |
+| 46,850 vertices | 127.5 ms | 12.6 ms | **10.1× faster** |
+| 187,394 vertices (large) | 628.9 ms | 20.6 ms | **30.5× faster** |
+
+**Takeaway:** The GPU backend is faster once your mesh has ~10,000+ vertices, and the advantage grows rapidly — a 187k-vertex mesh that takes 629 ms on CPU takes only 21 ms on GPU.
+
+---
+
+### Poisson Reconstruction Solve (`L + 1e-6·I`, the ill-conditioned system)
+
+This system is much harder to solve iteratively (condition number ~10¹⁰), requiring up to 2,000 PCG iterations.
+
+| Mesh Size | CPU Time | GPU Time | Speedup |
+|---|---|---|---|
+| 11,714 vertices | 25.5 ms | 73.5 ms | 0.35× — CPU faster |
+| 46,850 vertices | 128.1 ms | 192.6 ms | 0.66× — CPU faster |
+| 187,394 vertices (large) | 630.3 ms | 471.2 ms | **1.3× faster** |
+
+**Takeaway:** For the Poisson step, GPU only wins on very large meshes (>100k vertices). The CPU's Cholesky factorization is hard to beat here at smaller scales. Use FP64 — FP32 fails to converge on this system at any mesh size.
+
+---
+
+### Full Heat Method Pipeline (setup + all solves)
+
+For a one-shot call (`heatMethodDistance()`), setup (factorization / GPU upload) dominates for large meshes. CPU Cholesky factorization grows as O(N^1.5)–O(N²), while GPU setup is nearly constant.
+
+| Mesh | CPU Total | GPU Total | Speedup |
+|---|---|---|---|
+| 250 vertices | 11.4 ms | 15.1 ms | CPU faster |
+| 2,930 vertices | 169.1 ms | 56.3 ms | **3.0×** |
+| 11,714 vertices | 948.5 ms | 158.8 ms | **6.0×** |
+| 46,850 vertices | 6,185.8 ms | 540.5 ms | **11.4×** |
+
+**GPU starts winning at ~3,000 vertices for the full pipeline** because it avoids the expensive Cholesky factorization entirely.
+
+---
+
+### PCIe Transfer Overhead
+
+Data must be copied between CPU RAM and GPU VRAM each solve. This cost is negligible:
+
+- At 187k vertices, transfer = **0.35 ms** out of a 20.9 ms total solve = **1.7% overhead**.
+
+---
+
+### When to Use the GPU Backend
+
+| Scenario | Recommendation |
+|---|---|
+| Mesh < 5,000 vertices | Use CPU (default) |
+| Mesh 5,000–30,000 vertices | GPU faster for setup; similar query speed |
+| Mesh > 30,000 vertices | **Use GPU** — significant speedup for both |
+| Repeated queries, same mesh | **Use GPU** — setup cost amortized, fast per-query |
+| Need FP32 precision | Heat diffusion only — **do not use FP32 for Poisson** |
 
 ---
 
@@ -82,7 +160,12 @@ See [`docs/gpu_solver/`](docs/gpu_solver/) for architecture details, benchmark d
 [CinoLib](https://github.com/mlivesu/cinolib)
 
 ---
-**Additional Information:**
-GPU Support provided to this library by Suraj Kumar from Indian Institute Of Technology Jodhpur.
 
 
+**GPU backend** (CUDA PCG solver, Heat Method & Vector Heat Method GPU integration) contributed by **Suraj Kumar**, Indian Institute of Technology Jodhpur.
+
+
+
+
+
+Development of this software was funded in part by NSF Award 1717320, an NSF graduate research fellowship, and gifts from Adobe Research and Autodesk, Inc.
