@@ -86,5 +86,3 @@ See [`docs/gpu_solver/`](docs/gpu_solver/) for architecture details, benchmark d
 GPU Support provided to this library by Suraj Kumar from Indian Institute Of Technology Jodhpur.
 
 
-
-
