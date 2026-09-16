@@ -26,11 +26,18 @@ enum class LogMapStrategy {
   AffineAdaptive, // the logmap from the Affine Heat Method, no prefactoring for repeated solves, but most accurate
 };
 
+// Supported solver backends for VectorHeatMethodSolver
+enum class VectorHeatSolverBackend {
+  CPU,      // Standard CPU solver (PositiveDefiniteSolver / SquareSolver)
+  CUDA_PCG  // GPU-accelerated Jacobi-PCG (CUDAPCGPositiveDefiniteSolver / ComplexCUDAPCGPositiveDefiniteSolver)
+};
+
 class VectorHeatMethodSolver {
 
 public:
   // === Constructor
-  VectorHeatMethodSolver(IntrinsicGeometryInterface& geom, double tCoef = 1.0);
+  VectorHeatMethodSolver(IntrinsicGeometryInterface& geom, double tCoef = 1.0,
+                         VectorHeatSolverBackend backend = VectorHeatSolverBackend::CPU);
 
 
   // === Scalar Extension
@@ -50,6 +57,7 @@ public:
   // === Options and parameters
   const double tCoef; // the time parameter used for heat flow, measured as time = tCoef * mean_edge_length^2
                       // default: 1.0
+  const VectorHeatSolverBackend backend;
 
   // === Low-level queries
   VertexData<double> scalarDiffuse(const VertexData<double>& rhs); // call scalarHeatSolver on rhs
@@ -68,11 +76,11 @@ private:
   // Parameters
   double shortTime; // the actual time used for heat flow computed from tCoef
 
-  // Solvers
-  std::unique_ptr<PositiveDefiniteSolver<double>> scalarHeatSolver;
+  // Solvers (widened to LinearSolver base class to allow CPU or GPU backends)
+  std::unique_ptr<LinearSolver<double>> scalarHeatSolver;
   std::unique_ptr<LinearSolver<std::complex<double>>> vectorHeatSolver;
   std::unique_ptr<LinearSolver<double>> affineHeatSolver;
-  std::unique_ptr<PositiveDefiniteSolver<double>> poissonSolver;
+  std::unique_ptr<LinearSolver<double>> poissonSolver;
   SparseMatrix<double> massMat;
 
   // Helpers

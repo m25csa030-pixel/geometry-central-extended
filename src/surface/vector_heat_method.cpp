@@ -2,11 +2,16 @@
 #include "geometrycentral/numerical/linear_algebra_utilities.h"
 #include "geometrycentral/utilities/vector2.h"
 
+#ifdef GC_HAVE_CUDA
+#include "geometrycentral/numerical/cuda_pcg_solver.h"
+#endif
+
 namespace geometrycentral {
 namespace surface {
 
-VectorHeatMethodSolver::VectorHeatMethodSolver(IntrinsicGeometryInterface& geom_, double tCoef_)
-    : tCoef(tCoef_), mesh(geom_.mesh), geom(geom_)
+VectorHeatMethodSolver::VectorHeatMethodSolver(IntrinsicGeometryInterface& geom_, double tCoef_,
+                                               VectorHeatSolverBackend backend_)
+    : tCoef(tCoef_), backend(backend_), mesh(geom_.mesh), geom(geom_)
 
 {
   geom.requireEdgeLengths();
@@ -37,7 +42,16 @@ void VectorHeatMethodSolver::ensureHaveScalarHeatSolver() {
 
   // Build the operator
   SparseMatrix<double> heatOp = massMat + shortTime * L;
-  scalarHeatSolver.reset(new PositiveDefiniteSolver<double>(heatOp));
+  if (backend == VectorHeatSolverBackend::CUDA_PCG) {
+#ifdef GC_HAVE_CUDA
+    scalarHeatSolver.reset(new CUDAPCGPositiveDefiniteSolver<double>(heatOp));
+#else
+    throw std::runtime_error(
+        "CUDA backend requested for VectorHeatMethodSolver, but geometry-central was compiled without GC_HAVE_CUDA.");
+#endif
+  } else {
+    scalarHeatSolver.reset(new PositiveDefiniteSolver<double>(heatOp));
+  }
 
   geom.unrequireCotanLaplacian();
 }
@@ -52,31 +66,40 @@ void VectorHeatMethodSolver::ensureHaveVectorHeatSolver() {
   // Build the operator
   SparseMatrix<std::complex<double>> vectorOp = massMat.cast<std::complex<double>>() + shortTime * Lconn;
 
-  // Check the Delaunay condition. If the mesh is Delaunay, then vectorOp is SPD, and we can use a
-  // PositiveDefiniteSolver. Otherwise, we must use a SquareSolver
-  geom.requireEdgeCotanWeights();
-  bool isDelaunay = true;
-  double minCotanWeight = std::numeric_limits<double>::max();
-  for (Edge e : mesh.edges()) {
-    minCotanWeight = std::min(minCotanWeight, geom.edgeCotanWeights[e]);
-    if (geom.edgeCotanWeights[e] < -1e-6) {
-      isDelaunay = false;
-      break;
-    }
-  }
-  geom.unrequireEdgeCotanWeights();
-
-  if (isDelaunay) {
-    // TODO we said the matrix should be SPD if Delaunay, but SuiteSparse is failing with non-SPD error
-    // (observed by nsharp on intrinsic delaunay RamSkull100k.obj)
-    // workaround with a try-catch for now
-    try {
-      vectorHeatSolver.reset(new PositiveDefiniteSolver<std::complex<double>>(vectorOp));
-    } catch (const std::runtime_error&) {
-      vectorHeatSolver.reset(new SquareSolver<std::complex<double>>(vectorOp));
-    }
+  if (backend == VectorHeatSolverBackend::CUDA_PCG) {
+#ifdef GC_HAVE_CUDA
+    vectorHeatSolver.reset(new ComplexCUDAPCGPositiveDefiniteSolver(vectorOp));
+#else
+    throw std::runtime_error(
+        "CUDA backend requested for VectorHeatMethodSolver, but geometry-central was compiled without GC_HAVE_CUDA.");
+#endif
   } else {
-    vectorHeatSolver.reset(new SquareSolver<std::complex<double>>(vectorOp)); // not necessarily SPD without Delaunay
+    // Check the Delaunay condition. If the mesh is Delaunay, then vectorOp is SPD, and we can use a
+    // PositiveDefiniteSolver. Otherwise, we must use a SquareSolver
+    geom.requireEdgeCotanWeights();
+    bool isDelaunay = true;
+    double minCotanWeight = std::numeric_limits<double>::max();
+    for (Edge e : mesh.edges()) {
+      minCotanWeight = std::min(minCotanWeight, geom.edgeCotanWeights[e]);
+      if (geom.edgeCotanWeights[e] < -1e-6) {
+        isDelaunay = false;
+        break;
+      }
+    }
+    geom.unrequireEdgeCotanWeights();
+
+    if (isDelaunay) {
+      // TODO we said the matrix should be SPD if Delaunay, but SuiteSparse is failing with non-SPD error
+      // (observed by nsharp on intrinsic delaunay RamSkull100k.obj)
+      // workaround with a try-catch for now
+      try {
+        vectorHeatSolver.reset(new PositiveDefiniteSolver<std::complex<double>>(vectorOp));
+      } catch (const std::runtime_error&) {
+        vectorHeatSolver.reset(new SquareSolver<std::complex<double>>(vectorOp));
+      }
+    } else {
+      vectorHeatSolver.reset(new SquareSolver<std::complex<double>>(vectorOp)); // not necessarily SPD without Delaunay
+    }
   }
 
   geom.unrequireVertexConnectionLaplacian();
@@ -152,7 +175,17 @@ void VectorHeatMethodSolver::ensureHavePoissonSolver() {
   SparseMatrix<double>& L = geom.cotanLaplacian;
 
   // Build the operator
-  poissonSolver.reset(new PositiveDefiniteSolver<double>(L));
+  if (backend == VectorHeatSolverBackend::CUDA_PCG) {
+#ifdef GC_HAVE_CUDA
+    SparseMatrix<double> Ls = L + 1e-6 * identityMatrix<double>(mesh.nVertices());
+    poissonSolver.reset(new CUDAPCGPositiveDefiniteSolver<double>(Ls));
+#else
+    throw std::runtime_error(
+        "CUDA backend requested for VectorHeatMethodSolver, but geometry-central was compiled without GC_HAVE_CUDA.");
+#endif
+  } else {
+    poissonSolver.reset(new PositiveDefiniteSolver<double>(L));
+  }
 
   geom.unrequireCotanLaplacian();
 }
@@ -315,11 +348,14 @@ VectorHeatMethodSolver::transportTangentVectors(const std::vector<std::tuple<Sur
     // For one sources, can just normalize and project
     double targetNorm = std::get<1>(sources[0]).norm();
 
-    vecSolution = (vecSolution.array() / vecSolution.array().abs()) * targetNorm;
-
-    // Copy to output vector
     for (Vertex v : mesh.vertices()) {
-      result[v] = Vector2::fromComplex(vecSolution[geom.vertexIndices[v]]);
+      size_t vInd = geom.vertexIndices[v];
+      double mag = std::abs(vecSolution[vInd]);
+      if (mag > 1e-30) {
+        result[v] = Vector2::fromComplex((vecSolution[vInd] / mag) * targetNorm);
+      } else {
+        result[v] = Vector2::zero();
+      }
     }
   } else {
     // For multiple sources, need to interpolate magnitudes
@@ -329,7 +365,9 @@ VectorHeatMethodSolver::transportTangentVectors(const std::vector<std::tuple<Sur
 
     // Scale and copy to result
     for (Vertex v : mesh.vertices()) {
-      Vector2 dir = Vector2::fromComplex(vecSolution[geom.vertexIndices[v]]).normalize();
+      size_t vInd = geom.vertexIndices[v];
+      double mag = std::abs(vecSolution[vInd]);
+      Vector2 dir = (mag > 1e-30) ? Vector2::fromComplex(vecSolution[vInd] / mag) : Vector2::zero();
       result[v] = dir * interpMags[v];
     }
   }
@@ -492,7 +530,11 @@ VertexData<Vector2> VectorHeatMethodSolver::computeLogMap_VectorHeat(const Verte
   Vector<std::complex<double>> radialSol = vectorHeatSolver->solve(radialRHS);
 
   // Normalize
-  radialSol = (radialSol.array() / radialSol.array().abs());
+  for (size_t i = 0; i < static_cast<size_t>(radialSol.size()); ++i) {
+    double mag = std::abs(radialSol[i]);
+    if (mag > 1e-30) radialSol[i] /= mag;
+    else radialSol[i] = 0.;
+  }
   radialSol[geom.vertexIndices[sourceVert]] = 0.;
 
 
@@ -506,7 +548,11 @@ VertexData<Vector2> VectorHeatMethodSolver::computeLogMap_VectorHeat(const Verte
   Vector<std::complex<double>> horizontalSol = vectorHeatSolver->solve(horizontalRHS);
 
   // Normalize
-  horizontalSol = (horizontalSol.array() / horizontalSol.array().abs());
+  for (size_t i = 0; i < static_cast<size_t>(horizontalSol.size()); ++i) {
+    double mag = std::abs(horizontalSol[i]);
+    if (mag > 1e-30) horizontalSol[i] /= mag;
+    else horizontalSol[i] = 0.;
+  }
 
 
   // === Integrate radial field to get distance

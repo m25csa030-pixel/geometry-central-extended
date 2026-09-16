@@ -112,6 +112,7 @@ set(TEST_SRCS
   src/stl_reader_test.cpp
   src/surface_misc_test.cpp
   src/utilities_test.cpp
+  src/heat_method_test.cpp
 )
 
 add_executable(geometry-central-test "${TEST_SRCS}")

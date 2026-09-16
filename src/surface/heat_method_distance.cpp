@@ -1,5 +1,9 @@
 #include "geometrycentral/surface/heat_method_distance.h"
 
+#ifdef GC_HAVE_CUDA
+#include "geometrycentral/numerical/cuda_pcg_solver.h"
+#endif
+
 #include "geometrycentral/surface/intrinsic_mollification.h"
 #include "geometrycentral/surface/simple_idt.h"
 #include "geometrycentral/surface/tufted_laplacian.h"
@@ -8,13 +12,13 @@
 namespace geometrycentral {
 namespace surface {
 
-VertexData<double> heatMethodDistance(IntrinsicGeometryInterface& geom, Vertex v) {
-  return HeatMethodDistanceSolver(geom).computeDistance(v);
+VertexData<double> heatMethodDistance(IntrinsicGeometryInterface& geom, Vertex v, HeatSolverBackend backend) {
+  return HeatMethodDistanceSolver(geom, 1.0, false, backend).computeDistance(v);
 }
 
 HeatMethodDistanceSolver::HeatMethodDistanceSolver(IntrinsicGeometryInterface& geom_, double tCoef_,
-                                                   bool useRobustLaplacian_)
-    : tCoef(tCoef_), useRobustLaplacian(useRobustLaplacian_), mesh(geom_.mesh), geom(geom_) {
+                                                   bool useRobustLaplacian_, HeatSolverBackend backend_)
+    : tCoef(tCoef_), useRobustLaplacian(useRobustLaplacian_), backend(backend_), mesh(geom_.mesh), geom(geom_) {
 
   // === Build & factor the linear systems
   if (useRobustLaplacian) {
@@ -59,14 +63,25 @@ HeatMethodDistanceSolver::HeatMethodDistanceSolver(IntrinsicGeometryInterface& g
 
   // Heat operator
   SparseMatrix<double> heatOp = M + shortTime * L;
-  heatSolver.reset(new PositiveDefiniteSolver<double>(heatOp));
 
   // Poisson solver
   // NOTE: In theory, it should not be necessary to shift the Laplacian: cotan-Laplace is always PSD. However, when the
   // matrix is only positive SEMIdefinite, some solvers may not work (ie Eigen's Cholesky solver doesn't work, but
   // Suitesparse does).
   SparseMatrix<double> Ls = L + 1e-6 * identityMatrix<double>(mesh.nVertices());
-  poissonSolver.reset(new PositiveDefiniteSolver<double>(Ls));
+
+  if (backend == HeatSolverBackend::CUDA_PCG) {
+#ifdef GC_HAVE_CUDA
+    heatSolver.reset(new CUDAPCGPositiveDefiniteSolver<double>(heatOp));
+    poissonSolver.reset(new CUDAPCGPositiveDefiniteSolver<double>(Ls));
+#else
+    throw std::runtime_error(
+        "CUDA backend requested for HeatMethodDistanceSolver, but geometry-central was compiled without GC_HAVE_CUDA.");
+#endif
+  } else {
+    heatSolver.reset(new PositiveDefiniteSolver<double>(heatOp));
+    poissonSolver.reset(new PositiveDefiniteSolver<double>(Ls));
+  }
 
   getGeom().unrequireEdgeLengths();
   getGeom().unrequireCotanLaplacian();

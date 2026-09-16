@@ -206,6 +206,21 @@ if(GC_HAVE_SUITESPARSE)
   target_link_libraries(geometry-central PRIVATE ${SUITESPARSE_LIBRARIES})
 endif()
 
+# CUDA GPU Acceleration Support
+if(GC_ENABLE_CUDA)
+  target_sources(geometry-central PRIVATE
+    numerical/cuda_pcg_solver.cu
+    ${INCLUDE_ROOT}/numerical/cuda_pcg_solver.h
+  )
+  target_compile_definitions(geometry-central PUBLIC GC_HAVE_CUDA)
+  target_include_directories(geometry-central SYSTEM PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+  target_link_libraries(geometry-central PRIVATE
+    CUDA::cusparse
+    CUDA::cublas
+    CUDA::cudart
+  )
+endif()
+
 # Export symbols if DLL is requested
 if(MSVC AND BUILD_SHARED_LIBS)
   set_target_properties(geometry-central PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)

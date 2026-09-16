@@ -17,8 +17,15 @@ class PointCloudHeatSolver; // forward declare to friend below
 
 namespace surface {
 
+// Supported solver backends for HeatMethodDistanceSolver
+enum class HeatSolverBackend {
+  CPU,      // Standard CPU direct solver (PositiveDefiniteSolver / SimplicialLDLT / CHOLMOD)
+  CUDA_PCG  // GPU-accelerated Jacobi-preconditioned Conjugate Gradient (CUDAPCGPositiveDefiniteSolver)
+};
+
 // One-off function to compute distance from a vertex
-VertexData<double> heatMethodDistance(IntrinsicGeometryInterface& geom, Vertex v);
+VertexData<double> heatMethodDistance(IntrinsicGeometryInterface& geom, Vertex v,
+                                      HeatSolverBackend backend = HeatSolverBackend::CPU);
 
 
 // Stateful class. Allows efficient repeated solves
@@ -26,7 +33,8 @@ class HeatMethodDistanceSolver {
 
 public:
   // === Constructor
-  HeatMethodDistanceSolver(IntrinsicGeometryInterface& geom, double tCoef = 1.0, bool useRobustLaplacian = false);
+  HeatMethodDistanceSolver(IntrinsicGeometryInterface& geom, double tCoef = 1.0, bool useRobustLaplacian = false,
+                           HeatSolverBackend backend = HeatSolverBackend::CPU);
 
   // === Methods
 
@@ -51,6 +59,7 @@ public:
   const double tCoef; // the time parameter used for heat flow, measured as time = tCoef * mean_edge_length^2
                       // default: 1.0
   const bool useRobustLaplacian;
+  const HeatSolverBackend backend;
 
 private:
   // === Members
@@ -66,9 +75,9 @@ private:
   // Parameters
   double shortTime; // the actual time used for heat flow computed from tCoef
 
-  // Solvers
-  std::unique_ptr<PositiveDefiniteSolver<double>> heatSolver;
-  std::unique_ptr<PositiveDefiniteSolver<double>> poissonSolver;
+  // Solvers (widened to LinearSolver<double> base class to allow CPU or GPU backends)
+  std::unique_ptr<LinearSolver<double>> heatSolver;
+  std::unique_ptr<LinearSolver<double>> poissonSolver;
 
   // Helpers
 
