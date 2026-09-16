@@ -82,25 +82,13 @@ See [`docs/gpu_solver/`](docs/gpu_solver/) for architecture details, benchmark d
 [CinoLib](https://github.com/mlivesu/cinolib)
 
 ---
-
-**Credits**
-
-Geometry-central is developed by [Nicholas Sharp](http://nmwsharp.com), with many contributions from 
-[Keenan Crane](http://keenan.is/here), 
-[Yousuf Soliman](http://www.its.caltech.edu/~ysoliman/),
-[Mark Gillespie](http://markjgillespie.com/),
-[Rohan Sawhney](http://rohansawhney.io/), and many others.
+**Additional Information:**
+GPU Support provided to this library by Suraj Kumar from Indian Institute Of Technology Jodhpur.
 
 
-
-If geometry-central contributes to an academic publication, cite it as:
-```bib
 @article{geometrycentral,
   title={GeometryCentral: A modern C++ library of data structures and algorithms for geometry processing},
-  author={Nicholas Sharp and Keenan Crane and others},
-  howpublished="\url{https://geometry-central.net/}",
-  year={2019}
+ 
 }
-```
 
-Development of this software was funded in part by NSF Award 1717320, an NSF graduate research fellowship, and gifts from Adobe Research and Autodesk, Inc.
+
