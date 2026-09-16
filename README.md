@@ -86,9 +86,5 @@ See [`docs/gpu_solver/`](docs/gpu_solver/) for architecture details, benchmark d
 GPU Support provided to this library by Suraj Kumar from Indian Institute Of Technology Jodhpur.
 
 
-@article{geometrycentral,
-  title={GeometryCentral: A modern C++ library of data structures and algorithms for geometry processing},
- 
-}
 
 
