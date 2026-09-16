@@ -166,6 +166,3 @@ Data must be copied between CPU RAM and GPU VRAM each solve. This cost is neglig
 
 
 
-
-
-Development of this software was funded in part by NSF Award 1717320, an NSF graduate research fellowship, and gifts from Adobe Research and Autodesk, Inc.
