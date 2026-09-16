@@ -15,6 +15,7 @@ Features include:
 - Implementations of canonical **geometric quantities** on surfaces, ranging from normals and curvatures to tangent vector bases to operators from discrete differential geometry.
 - A suite of **powerful algorithms**, including computing distances on surface, generating direction fields, and manipulating intrinsic Delaunay triangulations.
 - A coherent set of sparse **linear algebra tools**, based on Eigen and augmented to automatically utilize better solvers if available on your system.
+- An optional **CUDA GPU backend** (`GC_ENABLE_CUDA=ON`) providing a Jacobi-preconditioned Conjugate Gradient solver (`CUDAPCGPositiveDefiniteSolver`) that accelerates the Heat Method and Vector Heat Method by up to **30×** on large meshes (≥ 187k vertices) via NVIDIA cuSPARSE/cuBLAS.
 
 
 **Sample:**
@@ -36,10 +37,42 @@ for(Vertex v : mesh->vertices()) {
   }
   vertexAreas[v] = A;
 }
+
+// Compute geodesic distances with the GPU backend (requires GC_ENABLE_CUDA=ON)
+#include "geometrycentral/surface/heat_method_distance.h"
+using namespace geometrycentral::surface;
+
+HeatMethodDistanceSolver gpuSolver(*geometry, 1.0, /*useRobustLaplacian=*/false,
+                                   HeatSolverBackend::CUDA_PCG);
+VertexData<double> dist = gpuSolver.computeDistance(mesh->vertex(0));
 ```
 
 Check out the docs, tutorials, and build instructions at [geometry-central.net](http://geometry-central.net).  Use the [sample project](https://github.com/nmwsharp/gc-polyscope-project-template/) to get started with a build system and a gui.
 
+---
+
+## Building with GPU Support
+
+The CUDA backend is **off by default** and requires CUDA Toolkit ≥ 12.x, CMake ≥ 3.17, and an NVIDIA GPU with compute capability ≥ 7.5.
+
+```bash
+cmake -B build -S . \
+  -DGC_ENABLE_CUDA=ON \
+  -DCMAKE_CUDA_ARCHITECTURES=89 \   # replace with your GPU's sm level (75/80/86/89/90)
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
+```
+
+| GPU Architecture | `CMAKE_CUDA_ARCHITECTURES` |
+|---|---|
+| Turing (T4, RTX 20xx) | `75` |
+| Ampere (A100, RTX 30xx) | `80` or `86` |
+| Ada Lovelace (L4, RTX 40xx) | `89` |
+| Hopper (H100) | `90` |
+
+See [`docs/gpu_solver/`](docs/gpu_solver/) for architecture details, benchmark data, and known limitations.
+
+---
 
 **Related alternatives:** 
 [CGAL](https://www.cgal.org/),
